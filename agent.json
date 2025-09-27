@@ -30,7 +30,7 @@
             "report": "Here is the final answer from your managed agent '{{name}}':\n{{final_answer}}"
         }
     },
-    "max_steps": 6,
+    "max_steps": 1,
     "verbosity_level": 1,
     "grammar": null,
     "planning_interval": null,
