@@ -4,7 +4,7 @@ import requests
 import pytz
 import yaml
 from tools.final_answer import FinalAnswerTool
-
+import ollama
 from Gradio_UI import GradioUI
 
 # Below is an example of a tool that does nothing. Amaze us with your creativity !
@@ -41,13 +41,29 @@ custom_tool = my_custom_tool
 
 # If the agent does not answer, the model is overloaded, please use another model or the following Hugging Face Endpoint that also contains qwen2.5 coder:
 # model_id='https://pflgm2locj2t89co.us-east-1.aws.endpoints.huggingface.cloud' 
+# Simple wrapper for CodeAgent
 
-model = HfApiModel(
-max_tokens=2096,
-temperature=0.5,
-model_id='Qwen/Qwen2.5-Coder-32B-Instruct',# it is possible that this model may be overloaded
-custom_role_conversions=None,
-)
+class OllamaModelWrapper:
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+
+    def __call__(self, prompt: str):
+        # CodeAgent calls the model directly, so __call__ is required
+        response = ollama.Completion.create(
+            model=self.model_name,
+            prompt=prompt,
+            max_tokens=512  # adjust as needed
+        )
+        return response.text
+model = OllamaModelWrapper("mistral:latest")
+
+# model = HfApiModel(
+# max_tokens=2096,
+# temperature=0.5,
+# model_id='Qwen/Qwen2.5-Coder-32B-Instruct',# it is possible that this model may be overloaded
+# custom_role_conversions=None,
+# )
+
 
 
 # Import tool from Hub
@@ -55,18 +71,27 @@ image_generation_tool = load_tool("agents-course/text-to-image", trust_remote_co
 
 with open("testPrompts.yaml", 'r') as stream:
     prompt_templates = yaml.safe_load(stream)
-    
+
+
+
 agent = CodeAgent(
     model=model,
-    tools=[final_answer, current_time, custom_tool], ## add your tools here (don't remove final answer)
+    tools=[final_answer, current_time, custom_tool, image_generation_tool], ## add your tools here (don't remove final answer)
     max_steps=6,
     verbosity_level=1,
-    grammar=None,
-    planning_interval=None,
-    name=None,
-    description=None,
     prompt_templates=prompt_templates
 )
+# agent = CodeAgent(
+#     model=model,
+#     tools=[final_answer, current_time, custom_tool], ## add your tools here (don't remove final answer)
+#     max_steps=6,
+#     verbosity_level=1,
+#     grammar=None,
+#     planning_interval=None,
+#     name=None,
+#     description=None,
+#     prompt_templates=prompt_templates
+# )
 
 
 GradioUI(agent).launch()
