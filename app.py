@@ -1,97 +1,89 @@
-from smolagents import CodeAgent,DuckDuckGoSearchTool, HfApiModel,load_tool,tool
-import datetime
-import requests
-import pytz
-import yaml
+from smolagents import CodeAgent, tool, load_tool
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+import datetime, pytz, yaml
 from tools.final_answer import FinalAnswerTool
-import ollama
 from Gradio_UI import GradioUI
 
-# Below is an example of a tool that does nothing. Amaze us with your creativity !
+# ----------------- Tools -----------------
 @tool
-def my_custom_tool(arg1:str, arg2:int)-> str: #it's import to specify the return type
-    #Keep this format for the description / args / args description but feel free to modify the tool
-    """A tool that does nothing yet 
+def my_custom_tool(arg1: str, arg2: int) -> str:
+    """A custom tool that simply returns its input arguments.
+
     Args:
-        arg1: the first argument
-        arg2: the second argument
+        arg1 (str): The first argument
+        arg2 (int): The second argument
+
+    Returns:
+        str: A formatted string showing the received arguments
     """
-    return "What magic will you build ?"
+    return f"My tool got: {arg1} and {arg2}"
 
 @tool
 def get_current_time_in_timezone(timezone: str) -> str:
-    """A tool that fetches the current local time in a specified timezone.
+    """Return the current time in a given timezone.
+
     Args:
-        timezone: A string representing a valid timezone (e.g., 'America/New_York').
+        timezone (str): A valid timezone string (e.g., 'America/New_York')
+
+    Returns:
+        str: The current local time in the specified timezone, or an error message if invalid
     """
     try:
-        # Create timezone object
         tz = pytz.timezone(timezone)
-        # Get current time in that timezone
         local_time = datetime.datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
         return f"The current local time in {timezone} is: {local_time}"
     except Exception as e:
-        return f"Error fetching time for timezone '{timezone}': {str(e)}"
+        return f"Error: {str(e)}"
 
-
+# ----------------- Final Answer Tool -----------------
 final_answer = FinalAnswerTool()
 
-current_time= get_current_time_in_timezone
-custom_tool = my_custom_tool
+# ----------------- Prompt Templates -----------------
+with open("testPrompts.yaml") as f:
+    prompt_templates = yaml.safe_load(f)
 
-# If the agent does not answer, the model is overloaded, please use another model or the following Hugging Face Endpoint that also contains qwen2.5 coder:
-# model_id='https://pflgm2locj2t89co.us-east-1.aws.endpoints.huggingface.cloud' 
-# Simple wrapper for CodeAgent
+# ----------------- Local Hugging Face Model Wrapper -----------------
+model_name = "mistralai/Mistral-7B-v0.1"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name)
 
-class OllamaModelWrapper:
-    def __init__(self, model_name: str):
-        self.model_name = model_name
+class LocalHFWrapper:
+    def __init__(self, model, tokenizer, max_tokens=512):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.max_tokens = max_tokens
+        self.last_input_token_count = 0
 
-    def __call__(self, prompt: str):
-        # CodeAgent calls the model directly, so __call__ is required
-        response = ollama.Completion.create(
-            model=self.model_name,
-            prompt=prompt,
-            max_tokens=512  # adjust as needed
+        self.generator = pipeline(
+            "text-generation",
+            model=self.model,
+            tokenizer=self.tokenizer,
+            max_length=self.max_tokens
         )
-        return response.text
-model = OllamaModelWrapper("mistral:latest")
 
-# model = HfApiModel(
-# max_tokens=2096,
-# temperature=0.5,
-# model_id='Qwen/Qwen2.5-Coder-32B-Instruct',# it is possible that this model may be overloaded
-# custom_role_conversions=None,
-# )
+    def __call__(self, prompt, **kwargs):
+        # Ensure prompt is a string
+        if isinstance(prompt, list):
+            prompt = " ".join(prompt)
+        self.last_input_token_count = len(prompt.split())
 
+        # Generate text
+        output = self.generator(prompt, max_new_tokens=self.max_tokens)[0]["generated_text"]
+        return output
 
+wrapped_model = LocalHFWrapper(model, tokenizer)
 
-# Import tool from Hub
-image_generation_tool = load_tool("agents-course/text-to-image", trust_remote_code=True)
+# ----------------- Load Other Tools -----------------
+image_tool = load_tool("agents-course/text-to-image", trust_remote_code=True)
 
-with open("testPrompts.yaml", 'r') as stream:
-    prompt_templates = yaml.safe_load(stream)
-
-
-
+# ----------------- Create Agent -----------------
 agent = CodeAgent(
-    model=model,
-    tools=[final_answer, current_time, custom_tool, image_generation_tool], ## add your tools here (don't remove final answer)
+    model=wrapped_model,
+    tools=[final_answer, get_current_time_in_timezone, my_custom_tool, image_tool],
     max_steps=6,
     verbosity_level=1,
     prompt_templates=prompt_templates
 )
-# agent = CodeAgent(
-#     model=model,
-#     tools=[final_answer, current_time, custom_tool], ## add your tools here (don't remove final answer)
-#     max_steps=6,
-#     verbosity_level=1,
-#     grammar=None,
-#     planning_interval=None,
-#     name=None,
-#     description=None,
-#     prompt_templates=prompt_templates
-# )
 
-
+# ----------------- Launch Gradio -----------------
 GradioUI(agent).launch()

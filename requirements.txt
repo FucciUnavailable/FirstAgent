@@ -1,6 +1,10 @@
-markdownify
 smolagents==1.13.0
+gradio
+transformers
+torch
+pyyaml
+pytz
 requests
 duckduckgo_search
 pandas
-gradio
+markdownify
